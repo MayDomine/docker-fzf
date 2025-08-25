@@ -1,0 +1,144 @@
+#!/bin/bash
+
+# This script provides fzf-based autocompletion for Docker commands.
+#
+# REQUIREMENTS:
+#   - fzf: https://github.com/junegunn/fzf
+#   - Docker
+#
+# INSTALLATION:
+#   1. Save this script to a file, e.g., ~/.docker-fzf-completion.sh
+#   2. Source it from your ~/.bashrc or ~/.bash_profile:
+#      source ~/.docker-fzf-completion.sh
+#
+# NOTE: This script relies on the `_fzf_complete` function, which is
+# provided by fzf's shell integration scripts (e.g., completion.bash).
+# Ensure you have sourced fzf's completion script in your shell's
+# startup file.
+
+# Define custom formats for `docker ps` output.
+# The `table` directive automatically adds a header.
+FZF_DOCKER_PS_FORMAT="table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}"
+FZF_DOCKER_PS_START_FORMAT="table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Image}}"
+
+# Main completion function that delegates to helper functions based on the command.
+_fzf_complete_docker() {
+    local cmd="${COMP_WORDS[1]}"
+
+    case "$cmd" in
+        tag|run|push|build)
+            _fzf_complete_docker_images "$@"
+            ;;
+        rmi)
+            _fzf_complete_docker_rmi "$@"
+            ;;
+        stop|exec|kill|restart|attach)
+            _fzf_complete_docker_ps "$@"
+            ;;
+        logs)
+            _fzf_complete_docker_logs "$@"
+            ;;
+        rm)
+            _fzf_complete_docker_rm "$@"
+            ;;
+        start)
+            _fzf_complete_docker_start "$@"
+            ;;
+        rename)  # New case for docker rename
+            _fzf_complete_docker_rename "$@"
+            ;;
+        *)
+            # If it's the first word, complete the docker command itself.
+            if (( COMP_CWORD == 1 )); then
+                _fzf_complete_docker_commands "$@"
+            fi
+            ;;
+    esac
+}
+
+# Completes the main Docker commands (e.g., run, ps, images).
+# This function still uses _fzf_complete as its input is single-column.
+_fzf_complete_docker_commands() {
+    _fzf_complete "--reverse --height 40% --header='Docker commands'" "$@" < <(
+        # Parse the help text to find all management commands.
+        docker --help 2>&1 | sed -n -e '/Management Commands:/,$p' | \
+        awk '/^  [a-z]/ {print $1}' | sort -u
+    )
+}
+
+# Completes Docker image names and tags for commands like `run`, `build`, etc.
+_fzf_complete_docker_images() {
+    # FIX: Call fzf directly and pipe its output to awk to select the first column.
+    # This ensures only the REPOSITORY:TAG is used for completion.
+    local out
+    out=$(docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}\t{{.Size}}" | \
+          fzf --multi --header-lines=1 --header='[Images] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+# Completes running container IDs for commands like `stop`, `exec`, etc.
+_fzf_complete_docker_ps() {
+    # FIX: Call fzf directly and pipe its output to awk to select the first column (ID).
+    local out
+    out=$(docker ps --format "$FZF_DOCKER_PS_FORMAT" | \
+          fzf --multi --header-lines=1 --header='[Containers] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+# Completes any container ID for `logs`, with a preview window.
+_fzf_complete_docker_logs() {
+    # FIX: Call fzf directly and pipe its output to awk. The preview still works
+    # because it operates on the input to fzf, before the awk pipe.
+    local out
+    out=$(docker ps -a --format "$FZF_DOCKER_PS_FORMAT" | \
+          fzf --multi --header-lines=1 \
+              --preview 'docker logs --tail=20 {1}' \
+              --preview-window 'down:60%:wrap' \
+              --bind 'ctrl-/:change-preview-window(down:60%|hidden|)' \
+              --header='[Logs] TAB:multi-select | ENTER:confirm | CTRL-/:toggle preview' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+# Completes any container ID for `rm`.
+_fzf_complete_docker_rm() {
+    local out
+    out=$(docker ps -a --format "$FZF_DOCKER_PS_FORMAT" | \
+          fzf --multi --header-lines=1 --header='[Remove Containers] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+# Completes image IDs for `rmi`.
+_fzf_complete_docker_rmi() {
+    # FIX: Call fzf directly and pipe to awk to select the second column (IMAGE ID).
+    local out
+    out=$(docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}" | \
+          fzf --multi --header-lines=1 --header='[Remove Images] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $2}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+# Completes exited container IDs for `start`.
+_fzf_complete_docker_start() {
+    local out
+    out=$(docker ps -a --filter "status=exited" --format "$FZF_DOCKER_PS_START_FORMAT" | \
+          fzf --multi --header-lines=1 --header='[Start Containers] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
+
+
+   _fzf_complete_docker_rename() {
+       local out
+       out=$(docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Status}}" | \
+             fzf --multi --header-lines=1 \
+                 --header='[Rename Containers] TAB:multi-select | ENTER:confirm' | \
+             awk '{print $1}')
+       read -ra COMPREPLY <<< "$out"
+   }
+
+# Register the completion function for the `docker` command in Bash.
+[ -n "$BASH" ] && complete -F _fzf_complete_docker -o default -o bashdefault docker
