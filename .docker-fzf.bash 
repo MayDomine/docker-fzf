@@ -131,14 +131,14 @@ _fzf_complete_docker_start() {
 }
 
 
-   _fzf_complete_docker_rename() {
-       local out
-       out=$(docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Status}}" | \
-             fzf --multi --header-lines=1 \
-                 --header='[Rename Containers] TAB:multi-select | ENTER:confirm' | \
-             awk '{print $1}')
-       read -ra COMPREPLY <<< "$out"
-   }
+_fzf_complete_docker_rename() {
+    local out
+    out=$(docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}" | \
+          fzf --multi --header-lines=1 \
+              --header='[Rename Containers] TAB:multi-select | ENTER:confirm' | \
+          awk '{print $1}')
+    read -ra COMPREPLY <<< "$out"
+}
 
 # Register the completion function for the `docker` command in Bash.
 [ -n "$BASH" ] && complete -F _fzf_complete_docker -o default -o bashdefault docker
